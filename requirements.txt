@@ -1,0 +1,6 @@
+uvicorn[standard]
+ fastapi
+ torch
+ torchvision
+ pillow
+ numpy
