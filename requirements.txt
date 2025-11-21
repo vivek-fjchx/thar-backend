@@ -1,6 +1,9 @@
-uvicorn[standard]
- fastapi
- torch
- torchvision
- pillow
- numpy
+fastapi
+uvicorn [standard]
+pydantic
+torch
+torchvision
+python-multipart
+pillow
+albumentations
+numpy
