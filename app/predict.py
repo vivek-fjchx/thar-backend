@@ -10,24 +10,28 @@ class Predictor:
     def __init__(self, model_path: str):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Load ResNet50
-        self.model = models.resnet50(pretrained=False)
-        self.model.fc = torch.nn.Linear(self.model.fc.in_features, 2)
+        # ---------- Load MobileNetV2 ----------
+        self.model = models.mobilenet_v2(weights=None)
+        self.model.classifier[1] = torch.nn.Linear(self.model.classifier[1].in_features, 2)
 
+        # Load pretrained weights
         state_dict = torch.load(model_path, map_location=self.device)
         self.model.load_state_dict(state_dict)
 
         self.model = self.model.to(self.device)
         self.model.eval()
 
-        # Target layer for GradCAM
-        self.target_layer = self.model.layer4[-1]
+        # ---------- Target layer for GradCAM ----------
+        # MobileNetV2 last feature layer is features[-1]
+        self.target_layer = self.model.features[-1]
 
         # Create GradCAM once at startup
         self.gradcam = GradCAM(self.model, self.target_layer)
 
+        # Class names
         self.class_names = ["thar", "wrangler"]
 
+        # Image transform
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -48,7 +52,7 @@ class Predictor:
         confidence, idx = torch.max(probs, dim=1)
         class_name = self.class_names[idx.item()]
 
-        # GradCAM (this runs forward+backward inside)
+        # GradCAM (runs forward+backward internally)
         cam_map, _ = self.gradcam(x)
 
         # Overlay heatmap on original image

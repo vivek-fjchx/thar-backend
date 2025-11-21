@@ -32,7 +32,7 @@ model_path = os.path.join(
     os.path.dirname(__file__),
     "..",
     "models",
-    "thar_wrangler.pth"
+    "thar_wrangler_mobilenetv2.pth"
 )
 model_path = os.path.abspath(model_path)
 
