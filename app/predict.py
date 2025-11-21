@@ -20,10 +20,10 @@ class Predictor:
         self.model = self.model.to(self.device)
         self.model.eval()
 
-        # GradCAM target
+        # Target layer for GradCAM
         self.target_layer = self.model.layer4[-1]
 
-        # Create GradCAM once (important!)
+        # Create GradCAM once at startup
         self.gradcam = GradCAM(self.model, self.target_layer)
 
         self.class_names = ["thar", "wrangler"]
@@ -41,16 +41,20 @@ class Predictor:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         x = self.transform(img).unsqueeze(0).to(self.device)
 
-        # Forward
+        # Forward pass
         logits = self.model(x)
         probs = torch.softmax(logits, dim=1)
 
         confidence, idx = torch.max(probs, dim=1)
         class_name = self.class_names[idx.item()]
 
-        # GradCAM
-        cam_map, _ = self.gradcam.generate(x)
+        # GradCAM (this runs forward+backward inside)
+        cam_map, _ = self.gradcam(x)
+
+        # Overlay heatmap on original image
         overlay = overlay_heatmap(img, cam_map)
+
+        # Encode final GradCAM image
         gradcam_image_base64 = encode_image(overlay)
 
         return {
