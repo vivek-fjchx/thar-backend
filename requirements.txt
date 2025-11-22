@@ -1,9 +1,16 @@
-fastapi
-uvicorn [standard]
-pydantic
-torch
-torchvision
-python-multipart
-pillow
-albumentations
-numpy
+# FastAPI
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# PyTorch (CPU-only for memory efficiency)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.1.0+cpu
+torchvision==0.16.0+cpu
+
+# Image processing
+Pillow==10.1.0
+numpy==1.24.3
+
+# CORS
+python-dotenv==1.0.0
