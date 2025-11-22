@@ -1,7 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, Request
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import os
+import gc
 
+# Import predictor class but don't instantiate yet
 from app.predict import Predictor
 
 
@@ -12,59 +15,57 @@ app = FastAPI()
 
 
 # -------------------------------
-# CORS - Method 1: Middleware (Most permissive for debugging)
+# CORS (required for Next.js)
 # -------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for now
-    allow_credentials=False,  # Set to False when using "*"
+    allow_origins=["*"],
+    allow_credentials=False,  # Must be False when using "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
 # -------------------------------
-# CORS - Method 2: Manual headers on every response
+# Lazy load predictor
 # -------------------------------
-@app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    return response
+predictor = None
 
-
-# -------------------------------
-# Handle OPTIONS preflight for all routes
-# -------------------------------
-@app.options("/{full_path:path}")
-async def options_handler(full_path: str):
-    return JSONResponse(
-        content={"message": "OK"},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        }
-    )
+def get_predictor():
+    """Load model only when first prediction is requested"""
+    global predictor
+    if predictor is None:
+        print("Loading model for the first time...")
+        model_path = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "models",
+            "thar_wrangler_mobilenetv2.pth"
+        )
+        model_path = os.path.abspath(model_path)
+        predictor = Predictor(model_path)
+        gc.collect()
+        print("Model loaded successfully!")
+    return predictor
 
 
 # -------------------------------
-# Load the Thar vs Wrangler model
-# (Loaded only once at startup)
+# Root endpoint
 # -------------------------------
-import os
+@app.get("/")
+def root():
+    return {"message": "Backend Running!", "status": "healthy"}
 
-model_path = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "models",
-    "thar_wrangler_mobilenetv2.pth"
-)
-model_path = os.path.abspath(model_path)
 
-predictor = Predictor(model_path)
+# -------------------------------
+# Health check (doesn't load model)
+# -------------------------------
+@app.get("/api/health")
+def health():
+    return {
+        "status": "healthy",
+        "model_loaded": predictor is not None
+    }
 
 
 # -------------------------------
@@ -73,34 +74,59 @@ predictor = Predictor(model_path)
 @app.post("/api/predict")
 async def predict_api(image: UploadFile = File(...)):
     try:
+        # Lazy load predictor
+        pred = get_predictor()
+        
+        # Read image bytes
         image_bytes = await image.read()
-        response = predictor.predict_from_bytes(image_bytes)
-        return JSONResponse(
-            content=response,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, OPTIONS",
-                "Access-Control-Allow-Headers": "*",
-            }
-        )
+        
+        # Make prediction
+        response = pred.predict_from_bytes(image_bytes)
+        
+        # Clean up
+        del image_bytes
+        gc.collect()
+        
+        return response
 
+    except MemoryError as e:
+        print(f"🔥 MEMORY ERROR: {e}")
+        gc.collect()
+        return JSONResponse(
+            content={
+                "error": "Server out of memory. The free tier has limited RAM. Please try again or contact support."
+            },
+            status_code=503
+        )
+    
     except Exception as e:
-        print("🔥 BACKEND ERROR:", e)
+        print(f"🔥 BACKEND ERROR: {e}")
+        gc.collect()
         return JSONResponse(
             content={"error": str(e)},
-            status_code=500,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-            }
+            status_code=500
         )
 
 
 # -------------------------------
-# Root endpoint
+# Startup event
 # -------------------------------
-@app.get("/")
-def root():
-    return JSONResponse(
-        content={"message": "Backend Running!"},
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+@app.on_event("startup")
+async def startup_event():
+    """Run on server startup"""
+    print("🚀 Server starting up...")
+    print("Model will be loaded on first prediction request")
+    gc.collect()
+
+
+# -------------------------------
+# Shutdown event
+# -------------------------------
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    global predictor
+    if predictor is not None:
+        del predictor
+    gc.collect()
+    print("👋 Server shutting down...")
