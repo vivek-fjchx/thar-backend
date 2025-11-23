@@ -40,7 +40,7 @@ def get_predictor():
             os.path.dirname(__file__),
             "..",
             "models",
-            "thar_wrangler_mobilenetv2.pth"
+            "thar_wrangler.onnx"
         )
         model_path = os.path.abspath(model_path)
         predictor = Predictor(model_path)
