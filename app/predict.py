@@ -13,7 +13,7 @@ class Predictor:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # -----------------------------
-        # ONNX Runtime Session
+        # ONNX Runtime Session  (Fast, Low RAM)
         # -----------------------------
         self.ort_session = ort.InferenceSession(
             onnx_path,
@@ -21,25 +21,26 @@ class Predictor:
         )
 
         # -----------------------------
-        # PyTorch model (GradCAM only)
+        # PyTorch model (Only for GradCAM)
         # -----------------------------
         self.model = models.mobilenet_v2(weights=None)
         self.model.classifier[1] = torch.nn.Linear(self.model.classifier[1].in_features, 2)
 
+        # Load the .pth only for GradCAM
         state_dict = torch.load(pytorch_weights, map_location=self.device)
         self.model.load_state_dict(state_dict)
 
         self.model = self.model.to(self.device)
         self.model.eval()
 
-        # Target layer for GradCAM
+        # Target conv layer for GradCAM
         self.target_layer = self.model.features[-1]
         self.gradcam = GradCAM(self.model, self.target_layer)
 
         # Class names
         self.class_names = ["thar", "wrangler"]
 
-        # Transform
+        # Preprocessing
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -50,12 +51,13 @@ class Predictor:
         ])
 
     # -----------------------------------------
-    # Prediction with ONNX Runtime
+    # ONNX Prediction (Fast Inference)
     # -----------------------------------------
     def onnx_predict(self, x):
         ort_inputs = {
             self.ort_session.get_inputs()[0].name: x.cpu().numpy()
         }
+
         ort_outs = self.ort_session.run(None, ort_inputs)
         logits = torch.tensor(ort_outs[0])
         probs = torch.softmax(logits, dim=1)
