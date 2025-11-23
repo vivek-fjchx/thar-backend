@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 import os
 import gc
 
-# Import predictor class but don't instantiate yet
+# Import predictor class (ONNX-only)
 from app.predict import Predictor
 
 
@@ -15,12 +15,12 @@ app = FastAPI()
 
 
 # -------------------------------
-# CORS (required for Next.js)
+# CORS
 # -------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,  # Must be False when using "*"
+    allow_credentials=False,  
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -32,27 +32,22 @@ app.add_middleware(
 predictor = None
 
 def get_predictor():
-    """Load model only when first prediction is requested"""
+    """Load ONNX model only when first prediction is requested"""
     global predictor
     if predictor is None:
-        print("Loading model for the first time...")
+        print("Loading ONNX model for the first time...")
 
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
 
         onnx_path = os.path.join(base_dir, "thar_wrangler.onnx")
-        pytorch_path = os.path.join(base_dir, "thar_wrangler.pth")
 
-        # Pass both ONNX + PyTorch weights
-        predictor = Predictor(
-            onnx_path=onnx_path,
-            pytorch_weights=pytorch_path
-        )
+        # Load ONNX-only Predictor (no PyTorch)
+        predictor = Predictor(onnx_path=onnx_path)
 
         gc.collect()
         print("Model loaded successfully!")
 
     return predictor
-
 
 
 # -------------------------------
@@ -64,7 +59,7 @@ def root():
 
 
 # -------------------------------
-# Health check (doesn't load model)
+# Health check
 # -------------------------------
 @app.get("/api/health")
 def health():
@@ -80,31 +75,25 @@ def health():
 @app.post("/api/predict")
 async def predict_api(image: UploadFile = File(...)):
     try:
-        # Lazy load predictor
         pred = get_predictor()
-        
-        # Read image bytes
+
         image_bytes = await image.read()
-        
-        # Make prediction
+
         response = pred.predict_from_bytes(image_bytes)
-        
-        # Clean up
+
         del image_bytes
         gc.collect()
-        
+
         return response
 
     except MemoryError as e:
         print(f"🔥 MEMORY ERROR: {e}")
         gc.collect()
         return JSONResponse(
-            content={
-                "error": "Server out of memory. The free tier has limited RAM. Please try again or contact support."
-            },
+            content={"error": "Server out of memory. Free tier has limited RAM."},
             status_code=503
         )
-    
+
     except Exception as e:
         print(f"🔥 BACKEND ERROR: {e}")
         gc.collect()
@@ -119,9 +108,8 @@ async def predict_api(image: UploadFile = File(...)):
 # -------------------------------
 @app.on_event("startup")
 async def startup_event():
-    """Run on server startup"""
-    print("🚀 Server starting up...")
-    print("Model will be loaded on first prediction request")
+    print("🚀 Server starting...")
+    print("ONNX model will load on first request.")
     gc.collect()
 
 
@@ -130,7 +118,6 @@ async def startup_event():
 # -------------------------------
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown"""
     global predictor
     if predictor is not None:
         del predictor
