@@ -36,17 +36,23 @@ def get_predictor():
     global predictor
     if predictor is None:
         print("Loading model for the first time...")
-        model_path = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "models",
-            "thar_wrangler.onnx"
+
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
+
+        onnx_path = os.path.join(base_dir, "thar_wrangler.onnx")
+        pytorch_path = os.path.join(base_dir, "thar_wrangler.pth")
+
+        # Pass both ONNX + PyTorch weights
+        predictor = Predictor(
+            onnx_path=onnx_path,
+            pytorch_weights=pytorch_path
         )
-        model_path = os.path.abspath(model_path)
-        predictor = Predictor(model_path)
+
         gc.collect()
         print("Model loaded successfully!")
+
     return predictor
+
 
 
 # -------------------------------
