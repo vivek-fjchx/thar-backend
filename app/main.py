@@ -7,6 +7,9 @@ import gc
 # Import predictor class but don't instantiate yet
 from app.predict import Predictor
 
+# >>> NEW — import the GradCAM predictor
+from app.gradcam_predict import GradCAMPredictor
+
 
 # -------------------------------
 # FastAPI App
@@ -27,25 +30,44 @@ app.add_middleware(
 
 
 # -------------------------------
-# Lazy load predictor
+# Lazy load predictors
 # -------------------------------
 predictor = None
+gradcam_predictor = None   # >>> NEW
+
 
 def get_predictor():
-    """Load model only when first prediction is requested"""
+    """Load ONNX model only when first prediction is requested"""
     global predictor
     if predictor is None:
-        print("Loading model for the first time...")
+        print("Loading ONNX model for the first time...")
         models_dir = os.path.join(os.path.dirname(__file__), "..", "models")
         models_dir = os.path.abspath(models_dir)
         
         onnx_path = os.path.join(models_dir, "thar_wrangler.onnx")
-        pytorch_weights = os.path.join(models_dir, "thar_wrangler_mobilenetv2.pth")
-        
+        pytorch_weights = None   # ONNX-only now
+
         predictor = Predictor(onnx_path, pytorch_weights)
         gc.collect()
-        print("Model loaded successfully!")
+        print("ONNX model loaded!")
     return predictor
+
+
+# >>> NEW - Lazy load PyTorch GradCAM model
+def get_gradcam_predictor():
+    """Load PyTorch model only when GradCAM is requested"""
+    global gradcam_predictor
+    if gradcam_predictor is None:
+        print("Loading PyTorch GradCAM model...")
+        models_dir = os.path.join(os.path.dirname(__file__), "..", "models")
+        models_dir = os.path.abspath(models_dir)
+
+        pytorch_weights = os.path.join(models_dir, "thar_wrangler_mobilenetv2.pth")
+        gradcam_predictor = GradCAMPredictor(pytorch_weights)
+        gc.collect()
+        print("GradCAM model loaded!")
+    return gradcam_predictor
+
 
 
 # -------------------------------
@@ -57,13 +79,14 @@ def root():
 
 
 # -------------------------------
-# Health check (doesn't load model)
+# Health check
 # -------------------------------
 @app.get("/api/health")
 def health():
     return {
         "status": "healthy",
-        "model_loaded": predictor is not None
+        "onnx_loaded": predictor is not None,
+        "gradcam_loaded": gradcam_predictor is not None
     }
 
 
@@ -73,48 +96,62 @@ def health():
 async def _handle_predict_async(image: UploadFile):
     """Shared async prediction logic"""
     try:
-        # Lazy load predictor
         pred = get_predictor()
-        
-        # Read image bytes
         image_bytes = await image.read()
-        
-        # Make prediction
+
         response = pred.predict_from_bytes(image_bytes)
-        
-        # Clean up
+
         del image_bytes
         gc.collect()
-        
+
         return response
 
-    except MemoryError as e:
-        print(f"🔥 MEMORY ERROR: {e}")
+    except MemoryError:
         gc.collect()
         return JSONResponse(
-            content={
-                "error": "Server out of memory. The free tier has limited RAM. Please try again or contact support."
-            },
+            content={"error": "Server out of memory. Try again."},
             status_code=503
         )
-    
+
     except Exception as e:
-        print(f"🔥 BACKEND ERROR: {e}")
         gc.collect()
         return JSONResponse(
             content={"error": str(e)},
             status_code=500
         )
 
+
 @app.post("/api/predict")
 async def predict_api(image: UploadFile = File(...)):
-    """Prediction endpoint - matches /api/predict"""
     return await _handle_predict_async(image)
+
 
 @app.post("/predict")
 async def predict(image: UploadFile = File(...)):
-    """Prediction endpoint - matches frontend /predict"""
     return await _handle_predict_async(image)
+
+
+
+# -------------------------------
+# >>> NEW — GradCAM Endpoint
+# -------------------------------
+@app.post("/api/gradcam")
+async def gradcam_api(image: UploadFile = File(...)):
+    try:
+        model = get_gradcam_predictor()
+        image_bytes = await image.read()
+        result = model.generate_gradcam(image_bytes)
+
+        del image_bytes
+        gc.collect()
+
+        return result
+
+    except Exception as e:
+        print("GradCAM ERROR:", e)
+        gc.collect()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 
 
 # -------------------------------
@@ -122,9 +159,8 @@ async def predict(image: UploadFile = File(...)):
 # -------------------------------
 @app.on_event("startup")
 async def startup_event():
-    """Run on server startup"""
-    print("🚀 Server starting up...")
-    print("Model will be loaded on first prediction request")
+    print("🚀 Server starting...")
+    print("Models will load lazily.")
     gc.collect()
 
 
@@ -133,9 +169,10 @@ async def startup_event():
 # -------------------------------
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown"""
-    global predictor
+    global predictor, gradcam_predictor
     if predictor is not None:
         del predictor
+    if gradcam_predictor is not None:
+        del gradcam_predictor
     gc.collect()
     print("👋 Server shutting down...")
