@@ -1,6 +1,6 @@
 import io
 import traceback
-import torch
+#import torch
 import onnxruntime as ort
 from PIL import Image, UnidentifiedImageError
 import numpy as np
