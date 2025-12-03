@@ -2,12 +2,9 @@ import io
 import traceback
 import torch
 import onnxruntime as ort
-from torchvision import transforms
 from PIL import Image, UnidentifiedImageError
 import numpy as np
 import gc
-
-# from app.gradcam import GradCAM, overlay_heatmap, encode_image    # ← DISABLED
 
 
 class Predictor:
@@ -32,21 +29,25 @@ class Predictor:
             raise
 
         # ---------- REMOVE PYTORCH MODEL & GRADCAM ----------
-        # self.model = ...
-        # self.gradcam = ...
-        # self.target_layer = ...
-        # (Disabled to save ~300–400MB memory)
+        # (Disabled to save RAM)
 
         self.class_names = ["thar", "wrangler"]
 
-        self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                [0.485, 0.456, 0.406],
-                [0.229, 0.224, 0.225]
-            )
-        ])
+        # ------------ REPLACEMENT FOR TORCHVISION TRANSFORMS ------------
+        # (lightweight + same output)
+        def preprocess(pil_img):
+            pil_img = pil_img.resize((224, 224))
+            img_np = np.array(pil_img).astype(np.float32)
+
+            img_np = img_np / 255.0
+            img_np = (img_np - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
+
+            # HWC → CHW
+            img_np = np.transpose(img_np, (2, 0, 1))
+
+            return torch.from_numpy(img_np).unsqueeze(0)
+
+        self.preprocess = preprocess
 
     # ----------------------------------------
     # ONNX inference
@@ -84,7 +85,8 @@ class Predictor:
             del image_bytes
             gc.collect()
 
-            x = self.transform(img).unsqueeze(0)
+            # --------- USE NEW LIGHTWEIGHT PREPROCESS ---------
+            x = self.preprocess(img)
 
             # ONNX inference
             probs = self.onnx_predict(x)
@@ -98,15 +100,6 @@ class Predictor:
 
             # ---------- GRADCAM DISABLED ----------
             gradcam_b64 = None
-            # try:
-            #     x_cam = x.to(self.device)
-            #     x_cam.requires_grad = True
-            #     cam_map, _ = self.gradcam(x_cam)
-            #     overlay = overlay_heatmap(img, cam_map)
-            #     gradcam_b64 = encode_image(overlay)
-            # except Exception as e:
-            #     print("GradCAM disabled / failed:", e)
-            # gradcam_b64 = None
 
             del img
             gc.collect()
