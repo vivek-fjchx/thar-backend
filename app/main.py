@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from app.cam_predict import CampPredictor
 import os
 import gc
 
@@ -51,6 +52,18 @@ def get_predictor():
         gc.collect()
         print("ONNX model loaded!")
     return predictor
+
+
+cam_predictor = None
+
+def get_cam_predictor():
+    global cam_predictor
+    if cam_predictor is None:
+        models_dir = os.path.join(os.path.dirname(__file__), "..", "models")
+        onnx_path = os.path.join(models_dir, "thar_wrangler.onnx")
+        cam_predictor = CampPredictor(onnx_path)
+    return cam_predictor
+
 
 
 # >>> NEW - Lazy load PyTorch GradCAM model
@@ -151,6 +164,17 @@ async def gradcam_api(image: UploadFile = File(...)):
         print("GradCAM ERROR:", e)
         gc.collect()
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/cam")
+async def cam_api(image: UploadFile = File(...)):
+    try:
+        model = get_cam_predictor()
+        image_bytes = await image.read()
+        return model.generate_cam(image_bytes)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 
 
 
