@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.cam_predict import CampPredictor
+from app.cam_predict import CamPredictor
 import os
 import gc
 
