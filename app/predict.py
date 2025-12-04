@@ -30,6 +30,8 @@ class Predictor:
             raise
 
         self.class_names = ["thar", "wrangler"]
+        print("DEBUG INPUT:", self.ort_session.get_inputs()[0])
+
 
     # --------------------------------------------------------
     # Preprocess — OpenCV fast version (pure numpy)
