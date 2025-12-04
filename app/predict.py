@@ -8,6 +8,7 @@ import gc
 
 
 class Predictor:
+    
     def __init__(self, onnx_path: str, pytorch_weights: str = None):
 
         # ---------- ONNX session ----------
@@ -30,21 +31,16 @@ class Predictor:
         self.class_names = ["thar", "wrangler"]
 
         # ---------- LIGHTWEIGHT PREPROCESS (pure numpy) ----------
- def preprocess(pil_img):
+    def preprocess(pil_img):        
     # convert PIL → OpenCV
-    img_np = np.array(pil_img)
-
-    # resize fast
-    img_np = cv2.resize(img_np, (224, 224), interpolation=cv2.INTER_AREA)
-
-    img_np = img_np.astype(np.float32) / 255.0
-    img_np = (img_np - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
-
-    # HWC → CHW
-    img_np = np.transpose(img_np, (2, 0, 1))
-
-    return img_np[np.newaxis, :, :, :] # shape (1,3,224,224)
-
+        img_np = np.array(pil_img)    
+        # resize fast
+        img_np = cv2.resize(img_np, (224, 224), interpolation=cv2.INTER_AREA)    
+        img_np = img_np.astype(np.float32) / 255.0
+        img_np = (img_np - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
+        # HWC → CHW
+        img_np = np.transpose(img_np, (2, 0, 1))    
+        return img_np[np.newaxis, :, :, :] # shape (1,3,224,224)
         self.preprocess = preprocess
 
     # ----------------------------------------
