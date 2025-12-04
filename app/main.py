@@ -119,19 +119,18 @@ async def _handle_predict_async(image: UploadFile):
 
         return response
 
-    except MemoryError:
+    except MemoryError:        
         gc.collect()
-        return JSONResponse(
+        return JSONResponse(            
             content={"error": "Server out of memory. Try again."},
             status_code=503
         )
 
-    except Exception as e:
+    except Exception as e:        
+        print("🔥 BACKEND ERROR:", e)
         gc.collect()
-        return JSONResponse(
-            content={"error": str(e)},
-            status_code=500
-        )
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 
 
 @app.post("/api/predict")
