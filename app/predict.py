@@ -1,6 +1,5 @@
 import io
 import traceback
-#import torch
 import onnxruntime as ort
 from PIL import Image, UnidentifiedImageError
 import numpy as np
@@ -9,7 +8,6 @@ import gc
 
 class Predictor:
     def __init__(self, onnx_path: str, pytorch_weights: str = None):
-        self.device = torch.device("cpu")
 
         # ---------- ONNX session ----------
         try:
@@ -28,13 +26,9 @@ class Predictor:
             traceback.print_exc()
             raise
 
-        # ---------- REMOVE PYTORCH MODEL & GRADCAM ----------
-        # (Disabled to save RAM)
-
         self.class_names = ["thar", "wrangler"]
 
-        # ------------ REPLACEMENT FOR TORCHVISION TRANSFORMS ------------
-        # (lightweight + same output)
+        # ---------- LIGHTWEIGHT PREPROCESS (pure numpy) ----------
         def preprocess(pil_img):
             pil_img = pil_img.resize((224, 224))
             img_np = np.array(pil_img).astype(np.float32)
@@ -45,27 +39,28 @@ class Predictor:
             # HWC → CHW
             img_np = np.transpose(img_np, (2, 0, 1))
 
-            return torch.from_numpy(img_np).unsqueeze(0)
+            # Add batch dimension
+            return img_np[np.newaxis, :, :, :]   # shape (1,3,224,224)
 
         self.preprocess = preprocess
 
     # ----------------------------------------
-    # ONNX inference
+    # ONNX inference (pure numpy)
     # ----------------------------------------
-    def onnx_predict(self, x: torch.Tensor):
+    def onnx_predict(self, x_np):
         try:
-            x_np = x.cpu().numpy().astype(np.float32, copy=False)
             input_name = self.ort_session.get_inputs()[0].name
-
             ort_inputs = {input_name: x_np}
             ort_outs = self.ort_session.run(None, ort_inputs)
-            logits = torch.from_numpy(ort_outs[0])
-            probs = torch.softmax(logits, dim=1)
 
-            del logits, ort_outs
-            gc.collect()
+            logits = ort_outs[0]   # numpy array (1,2)
+
+            # softmax manually
+            exp = np.exp(logits - np.max(logits))
+            probs = exp / np.sum(exp, axis=1, keepdims=True)
 
             return probs
+
         except Exception as e:
             print("ERROR in ONNX predict:", e)
             traceback.print_exc()
@@ -76,7 +71,6 @@ class Predictor:
     # ----------------------------------------
     def predict_from_bytes(self, image_bytes):
         try:
-            # Load image
             try:
                 img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
             except UnidentifiedImageError:
@@ -85,20 +79,20 @@ class Predictor:
             del image_bytes
             gc.collect()
 
-            # --------- USE NEW LIGHTWEIGHT PREPROCESS ---------
-            x = self.preprocess(img)
+            # preprocess → numpy
+            x_np = self.preprocess(img)
 
-            # ONNX inference
-            probs = self.onnx_predict(x)
+            # ONNX inference → numpy
+            probs = self.onnx_predict(x_np)
 
-            confidence_tensor, idx_tensor = torch.max(probs, dim=1)
-            confidence_val = float(confidence_tensor.item())
-            class_name = self.class_names[int(idx_tensor.item())]
+            # numpy argmax
+            idx = int(np.argmax(probs, axis=1)[0])
+            confidence_val = float(probs[0][idx])
+            class_name = self.class_names[idx]
 
-            del probs, confidence_tensor, idx_tensor
+            del probs
             gc.collect()
 
-            # ---------- GRADCAM DISABLED ----------
             gradcam_b64 = None
 
             del img
