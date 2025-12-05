@@ -1,15 +1,18 @@
 import io
 import traceback
+import torch
 import onnxruntime as ort
+from torchvision import transforms
 from PIL import Image, UnidentifiedImageError
 import numpy as np
-import cv2
 import gc
+
+# from app.gradcam import GradCAM, overlay_heatmap, encode_image    # ← DISABLED
 
 
 class Predictor:
-
     def __init__(self, onnx_path: str, pytorch_weights: str = None):
+        self.device = torch.device("cpu")
 
         # ---------- ONNX session ----------
         try:
@@ -23,67 +26,56 @@ class Predictor:
                 sess_options=sess_options,
                 providers=["CPUExecutionProvider"]
             )
-
         except Exception as e:
             print("ERROR creating ONNX session:", e)
             traceback.print_exc()
             raise
 
+        # ---------- REMOVE PYTORCH MODEL & GRADCAM ----------
+        # self.model = ...
+        # self.gradcam = ...
+        # self.target_layer = ...
+        # (Disabled to save ~300–400MB memory)
+
         self.class_names = ["thar", "wrangler"]
-        print("DEBUG INPUT:", self.ort_session.get_inputs()[0])
 
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                [0.485, 0.456, 0.406],
+                [0.229, 0.224, 0.225]
+            )
+        ])
 
-    # --------------------------------------------------------
-    # Preprocess — OpenCV fast version (pure numpy)
-    # --------------------------------------------------------
-    def preprocess(self, pil_img):
-
-        # PIL → NumPy
-        img_np = np.array(pil_img)
-
-        # Resize
-        img_np = cv2.resize(img_np, (224, 224), interpolation=cv2.INTER_AREA)
-
-        # Normalize
-        img_np = img_np.astype(np.float32) / 255.0
-        img_np = (img_np - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
-
-        # HWC → CHW
-        img_np = np.transpose(img_np, (2, 0, 1))
-
-        # Add batch dimension → (1, 3, 224, 224)
-        return img_np[np.newaxis, :, :, :]
-
-    # --------------------------------------------------------
-    # ONNX runtime forward pass — pure numpy
-    # --------------------------------------------------------
-    def onnx_predict(self, x_np):
-
+    # ----------------------------------------
+    # ONNX inference
+    # ----------------------------------------
+    def onnx_predict(self, x: torch.Tensor):
         try:
+            x_np = x.cpu().numpy().astype(np.float32, copy=False)
             input_name = self.ort_session.get_inputs()[0].name
+
             ort_inputs = {input_name: x_np}
-
             ort_outs = self.ort_session.run(None, ort_inputs)
+            logits = torch.from_numpy(ort_outs[0])
+            probs = torch.softmax(logits, dim=1)
 
-            logits = ort_outs[0]    # shape (1,2)
-
-            # Softmax
-            exp = np.exp(logits - np.max(logits))
-            probs = exp / np.sum(exp, axis=1, keepdims=True)
+            del logits, ort_outs
+            gc.collect()
 
             return probs
-
         except Exception as e:
             print("ERROR in ONNX predict:", e)
             traceback.print_exc()
             raise
 
-    # --------------------------------------------------------
-    # Main public API — pure numpy
-    # --------------------------------------------------------
+    # ----------------------------------------
+    # Main prediction entry
+    # ----------------------------------------
     def predict_from_bytes(self, image_bytes):
-
         try:
+            # Load image
             try:
                 img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
             except UnidentifiedImageError:
@@ -92,22 +84,29 @@ class Predictor:
             del image_bytes
             gc.collect()
 
-            # Preprocess
-            x_np = self.preprocess(img)
+            x = self.transform(img).unsqueeze(0)
 
             # ONNX inference
-            probs = self.onnx_predict(x_np)
+            probs = self.onnx_predict(x)
 
-            # Argmax
-            idx = int(np.argmax(probs, axis=1)[0])
-            confidence_val = float(probs[0][idx])
-            class_name = self.class_names[idx]
+            confidence_tensor, idx_tensor = torch.max(probs, dim=1)
+            confidence_val = float(confidence_tensor.item())
+            class_name = self.class_names[int(idx_tensor.item())]
 
-            del probs
+            del probs, confidence_tensor, idx_tensor
             gc.collect()
 
-            # GradCAM disabled
+            # ---------- GRADCAM DISABLED ----------
             gradcam_b64 = None
+            # try:
+            #     x_cam = x.to(self.device)
+            #     x_cam.requires_grad = True
+            #     cam_map, _ = self.gradcam(x_cam)
+            #     overlay = overlay_heatmap(img, cam_map)
+            #     gradcam_b64 = encode_image(overlay)
+            # except Exception as e:
+            #     print("GradCAM disabled / failed:", e)
+            # gradcam_b64 = None
 
             del img
             gc.collect()
