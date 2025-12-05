@@ -1,4 +1,4 @@
-import io
+'''import io
 import gc
 import traceback
 import numpy as np
@@ -127,3 +127,4 @@ class CamPredictor:
             print("CAM ERROR:", e)
             traceback.print_exc()
             raise
+'''
