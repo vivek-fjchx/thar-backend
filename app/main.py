@@ -1,7 +1,6 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.cam_predict import CamPredictor
 import os
 import gc
 
@@ -9,7 +8,7 @@ import gc
 from app.predict import Predictor
 
 # >>> NEW — import the GradCAM predictor
-#from app.gradcam_predict import GradCAMPredictor
+from app.gradcam_predict import GradCAMPredictor
 
 
 # -------------------------------
@@ -34,7 +33,7 @@ app.add_middleware(
 # Lazy load predictors
 # -------------------------------
 predictor = None
-#gradcam_predictor = None   # >>> NEW
+gradcam_predictor = None   # >>> NEW
 
 
 def get_predictor():
@@ -54,20 +53,8 @@ def get_predictor():
     return predictor
 
 
-cam_predictor = None
-
-def get_cam_predictor():
-    global cam_predictor
-    if cam_predictor is None:
-        models_dir = os.path.join(os.path.dirname(__file__), "..", "models")
-        onnx_path = os.path.join(models_dir, "thar_wrangler.onnx")
-        cam_predictor = CamPredictor(onnx_path)
-    return cam_predictor
-
-
-
 # >>> NEW - Lazy load PyTorch GradCAM model
-'''def get_gradcam_predictor():
+def get_gradcam_predictor():
     """Load PyTorch model only when GradCAM is requested"""
     global gradcam_predictor
     if gradcam_predictor is None:
@@ -79,7 +66,7 @@ def get_cam_predictor():
         gradcam_predictor = GradCAMPredictor(pytorch_weights)
         gc.collect()
         print("GradCAM model loaded!")
-    return gradcam_predictor'''
+    return gradcam_predictor
 
 
 
@@ -99,7 +86,7 @@ def health():
     return {
         "status": "healthy",
         "onnx_loaded": predictor is not None,
-        "cam_loaded": cam_predictor is not None
+        "gradcam_loaded": gradcam_predictor is not None
     }
 
 
@@ -119,18 +106,19 @@ async def _handle_predict_async(image: UploadFile):
 
         return response
 
-    except MemoryError:        
+    except MemoryError:
         gc.collect()
-        return JSONResponse(            
+        return JSONResponse(
             content={"error": "Server out of memory. Try again."},
             status_code=503
         )
 
-    except Exception as e:        
-        print("🔥 BACKEND ERROR:", e)
+    except Exception as e:
         gc.collect()
-        return JSONResponse({"error": str(e)}, status_code=500)
-
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500
+        )
 
 
 @app.post("/api/predict")
@@ -147,7 +135,7 @@ async def predict(image: UploadFile = File(...)):
 # -------------------------------
 # >>> NEW — GradCAM Endpoint
 # -------------------------------
-'''@app.post("/api/gradcam")
+@app.post("/api/gradcam")
 async def gradcam_api(image: UploadFile = File(...)):
     try:
         model = get_gradcam_predictor()
@@ -162,18 +150,7 @@ async def gradcam_api(image: UploadFile = File(...)):
     except Exception as e:
         print("GradCAM ERROR:", e)
         gc.collect()
-        return JSONResponse({"error": str(e)}, status_code=500)'''
-
-
-@app.post("/api/cam")
-async def cam_api(image: UploadFile = File(...)):
-    try:
-        model = get_cam_predictor()
-        image_bytes = await image.read()
-        return model.generate_cam(image_bytes)
-    except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-
 
 
 
@@ -192,10 +169,10 @@ async def startup_event():
 # -------------------------------
 @app.on_event("shutdown")
 async def shutdown_event():
-    global predictor, cam_predictor
+    global predictor, gradcam_predictor
     if predictor is not None:
         del predictor
-    if cam_predictor is not None:
-        del cam_predictor
+    if gradcam_predictor is not None:
+        del gradcam_predictor
     gc.collect()
     print("👋 Server shutting down...")
