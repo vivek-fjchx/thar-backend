@@ -7,8 +7,6 @@ from PIL import Image, UnidentifiedImageError
 import numpy as np
 import gc
 
-# from app.gradcam import GradCAM, overlay_heatmap, encode_image    # ← DISABLED
-
 
 class Predictor:
     def __init__(self, onnx_path: str, pytorch_weights: str = None):
@@ -31,12 +29,6 @@ class Predictor:
             traceback.print_exc()
             raise
 
-        # ---------- REMOVE PYTORCH MODEL & GRADCAM ----------
-        # self.model = ...
-        # self.gradcam = ...
-        # self.target_layer = ...
-        # (Disabled to save ~300–400MB memory)
-
         self.class_names = ["thar", "wrangler"]
 
         self.transform = transforms.Compose([
@@ -48,6 +40,7 @@ class Predictor:
             )
         ])
 
+
     # ----------------------------------------
     # ONNX inference
     # ----------------------------------------
@@ -58,6 +51,7 @@ class Predictor:
 
             ort_inputs = {input_name: x_np}
             ort_outs = self.ort_session.run(None, ort_inputs)
+
             logits = torch.from_numpy(ort_outs[0])
             probs = torch.softmax(logits, dim=1)
 
@@ -70,12 +64,12 @@ class Predictor:
             traceback.print_exc()
             raise
 
+
     # ----------------------------------------
-    # Main prediction entry
+    # Main prediction
     # ----------------------------------------
     def predict_from_bytes(self, image_bytes):
         try:
-            # Load image
             try:
                 img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
             except UnidentifiedImageError:
@@ -96,17 +90,8 @@ class Predictor:
             del probs, confidence_tensor, idx_tensor
             gc.collect()
 
-            # ---------- GRADCAM DISABLED ----------
+            # GradCAM disabled
             gradcam_b64 = None
-            # try:
-            #     x_cam = x.to(self.device)
-            #     x_cam.requires_grad = True
-            #     cam_map, _ = self.gradcam(x_cam)
-            #     overlay = overlay_heatmap(img, cam_map)
-            #     gradcam_b64 = encode_image(overlay)
-            # except Exception as e:
-            #     print("GradCAM disabled / failed:", e)
-            # gradcam_b64 = None
 
             del img
             gc.collect()
