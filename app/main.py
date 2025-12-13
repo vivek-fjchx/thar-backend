@@ -67,11 +67,9 @@ def health():
 # ================================================================
 # INTERNAL SHARED PREDICTION HANDLER
 # ================================================================
-async def _predict_single(image: UploadFile):
-    """Handles prediction for a single uploaded image."""
+async def _predict_single(image: UploadFile):    
     try:
         pred = get_predictor()
-
         image_bytes = await image.read()
 
         response = pred.predict_from_bytes(image_bytes)
@@ -81,9 +79,7 @@ async def _predict_single(image: UploadFile):
 
         return {
             "filename": image.filename,
-            "class": response["class"],
-            "confidence": response["confidence"],
-            "gradcam": response["gradcam"],
+            **response
         }
 
     except MemoryError:
